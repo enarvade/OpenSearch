@@ -12,20 +12,27 @@ import org.opensearch.action.admin.cluster.node.info.NodeInfo;
 import org.opensearch.action.admin.cluster.node.info.NodesInfoRequest;
 import org.opensearch.action.admin.cluster.node.info.NodesInfoResponse;
 import org.opensearch.action.admin.cluster.node.info.PluginsAndModules;
+import org.opensearch.action.admin.cluster.node.stats.NodesStatsRequest;
+import org.opensearch.action.admin.cluster.node.stats.NodesStatsResponse;
 import org.opensearch.action.admin.indices.cache.clear.ClearIndicesCacheRequest;
 import org.opensearch.action.admin.indices.cache.clear.ClearIndicesCacheResponse;
 import org.opensearch.action.admin.indices.forcemerge.ForceMergeResponse;
+import org.opensearch.action.admin.indices.stats.CommonStatsFlags;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.search.SearchType;
 import org.opensearch.cache.store.CaffeineHeapCache;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.metadata.IndexMetadata;
 import org.opensearch.common.cache.CacheType;
+import org.opensearch.common.cache.service.NodeCacheStats;
 import org.opensearch.common.cache.settings.CacheSettings;
+import org.opensearch.common.cache.stats.ImmutableCacheStats;
+import org.opensearch.common.cache.stats.ImmutableCacheStatsHolder;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.common.util.FeatureFlags;
 import org.opensearch.env.NodeEnvironment;
+import org.opensearch.index.IndexSettings;
 import org.opensearch.index.cache.request.RequestCacheStats;
 import org.opensearch.index.query.QueryBuilders;
 import org.opensearch.indices.IndicesRequestCache;
@@ -53,6 +60,9 @@ import static org.opensearch.test.hamcrest.OpenSearchAssertions.assertNoFailures
 import static org.opensearch.test.hamcrest.OpenSearchAssertions.assertSearchResponse;
 import static org.hamcrest.Matchers.greaterThan;
 
+/**
+ * Based on EhcacheDiskIT.
+ */
 @OpenSearchIntegTestCase.ClusterScope(numDataNodes = 0, scope = OpenSearchIntegTestCase.Scope.TEST)
 public class CaffeineHeapCacheIT extends OpenSearchIntegTestCase {
 
@@ -95,7 +105,7 @@ public class CaffeineHeapCacheIT extends OpenSearchIntegTestCase {
         );
     }
 
-    public void testSanityChecksWithIndicesRequestCache() throws InterruptedException {
+    public void testSanityChecksWithIndicesRequestCache() throws InterruptedException, IOException {
         internalCluster().startNode(Settings.builder().put(defaultSettings()).build());
         Client client = client();
         assertAcked(
@@ -134,7 +144,13 @@ public class CaffeineHeapCacheIT extends OpenSearchIntegTestCase {
             .get();
         assertSearchResponse(r1);
 
-        // The cached is actually used
+        // New CacheStats API
+        ImmutableCacheStatsHolder indicesStats = getNodeCacheStatsResult(client, List.of(IndicesRequestCache.INDEX_DIMENSION_NAME));
+        List<String> indexDimensions = List.of("index");
+        ImmutableCacheStats expectedStats = new ImmutableCacheStats(0, 1, 0, 0, 1);
+        checkCacheStatsAPIResponse(indicesStats, indexDimensions, expectedStats, false, true);
+
+        // The cache is actually used
         assertThat(
             client.admin().indices().prepareStats("index").setRequestCache(true).get().getTotal().getRequestCache().getMemorySizeInBytes(),
             greaterThan(0L)
@@ -186,6 +202,13 @@ public class CaffeineHeapCacheIT extends OpenSearchIntegTestCase {
         assertEquals(0, requestCacheStats.getHitCount());
         assertEquals(0, requestCacheStats.getEvictions());
         assertEquals(perQuerySizeInCacheInBytes * numberOfIndexedItems, requestCacheStats.getMemorySizeInBytes());
+
+        // New CacheStats API
+        ImmutableCacheStatsHolder indicesStats = getNodeCacheStatsResult(client, List.of(IndicesRequestCache.INDEX_DIMENSION_NAME));
+        List<String> indexDimensions = List.of("index");
+        ImmutableCacheStats expectedStats = new ImmutableCacheStats(0, numberOfIndexedItems, 0, perQuerySizeInCacheInBytes * numberOfIndexedItems, numberOfIndexedItems);
+        checkCacheStatsAPIResponse(indicesStats, indexDimensions, expectedStats, true, true);
+
         for (int iterator = 0; iterator < numberOfIndexedItems; iterator++) {
             SearchResponse resp = client.prepareSearch("index")
                 .setRequestCache(true)
@@ -198,6 +221,12 @@ public class CaffeineHeapCacheIT extends OpenSearchIntegTestCase {
         assertEquals(numberOfIndexedItems, requestCacheStats.getMissCount());
         assertEquals(perQuerySizeInCacheInBytes * numberOfIndexedItems, requestCacheStats.getMemorySizeInBytes());
         assertEquals(0, requestCacheStats.getEvictions());
+
+        // New CacheStats API
+        indicesStats = getNodeCacheStatsResult(client, List.of(IndicesRequestCache.INDEX_DIMENSION_NAME));
+        expectedStats = new ImmutableCacheStats(numberOfIndexedItems, numberOfIndexedItems, 0, perQuerySizeInCacheInBytes * numberOfIndexedItems, numberOfIndexedItems);
+        checkCacheStatsAPIResponse(indicesStats, indexDimensions, expectedStats, true, true);
+
         // Explicit refresh would invalidate cache entries.
         refreshAndWaitForReplication();
         assertBusy(() -> {
@@ -209,6 +238,11 @@ public class CaffeineHeapCacheIT extends OpenSearchIntegTestCase {
         // Hits and misses stats shouldn't get cleared up.
         assertEquals(numberOfIndexedItems, requestCacheStats.getHitCount());
         assertEquals(numberOfIndexedItems, requestCacheStats.getMissCount());
+
+        // New CacheStats API
+        indicesStats = getNodeCacheStatsResult(client, List.of(IndicesRequestCache.INDEX_DIMENSION_NAME));
+        expectedStats = new ImmutableCacheStats(numberOfIndexedItems, numberOfIndexedItems, 0, 0, 0);
+        checkCacheStatsAPIResponse(indicesStats, indexDimensions, expectedStats, true, true);
     }
 
     public void testExplicitCacheClearWithIndicesRequestCache() throws Exception {
@@ -258,6 +292,12 @@ public class CaffeineHeapCacheIT extends OpenSearchIntegTestCase {
         assertEquals(0, requestCacheStats.getEvictions());
         assertEquals(perQuerySizeInCacheInBytes * numberOfIndexedItems, requestCacheStats.getMemorySizeInBytes());
 
+        // New CacheStats API
+        ImmutableCacheStatsHolder indicesStats = getNodeCacheStatsResult(client, List.of(IndicesRequestCache.INDEX_DIMENSION_NAME));
+        List<String> indexDimensions = List.of("index");
+        ImmutableCacheStats expectedStats = new ImmutableCacheStats(0, numberOfIndexedItems, 0, perQuerySizeInCacheInBytes * numberOfIndexedItems, numberOfIndexedItems);
+        checkCacheStatsAPIResponse(indicesStats, indexDimensions, expectedStats, true, true);
+
         // Explicit clear the cache.
         ClearIndicesCacheRequest request = new ClearIndicesCacheRequest("index");
         ClearIndicesCacheResponse response = client.admin().indices().clearCache(request).get();
@@ -267,6 +307,54 @@ public class CaffeineHeapCacheIT extends OpenSearchIntegTestCase {
             // All entries should get cleared up.
             assertTrue(getRequestCacheStats(client, "index").getMemorySizeInBytes() == 0);
         }, 1, TimeUnit.SECONDS);
+
+        // New CacheStats API
+        indicesStats = getNodeCacheStatsResult(client, List.of(IndicesRequestCache.INDEX_DIMENSION_NAME));
+        expectedStats = new ImmutableCacheStats(0, numberOfIndexedItems, 0, 0, 0);
+        checkCacheStatsAPIResponse(indicesStats, indexDimensions, expectedStats, true, true);
+    }
+
+    private static void checkCacheStatsAPIResponse(
+        ImmutableCacheStatsHolder statsHolder,
+        List<String> dimensionValues,
+        ImmutableCacheStats expectedStats,
+        boolean checkMemorySize,
+        boolean checkEntries
+    ) {
+        ImmutableCacheStats aggregatedStatsResponse = statsHolder.getStatsForDimensionValues(dimensionValues);
+        assertNotNull(aggregatedStatsResponse);
+        assertEquals(expectedStats.getHits(), (int) aggregatedStatsResponse.getHits());
+        assertEquals(expectedStats.getMisses(), (int) aggregatedStatsResponse.getMisses());
+        assertEquals(expectedStats.getEvictions(), (int) aggregatedStatsResponse.getEvictions());
+        if (checkMemorySize) {
+            assertEquals(expectedStats.getSizeInBytes(), (int) aggregatedStatsResponse.getSizeInBytes());
+        }
+        if (checkEntries) {
+            assertEquals(expectedStats.getItems(), (int) aggregatedStatsResponse.getItems());
+        }
+    }
+
+    private static ImmutableCacheStatsHolder getNodeCacheStatsResult(Client client, List<String> aggregationLevels) throws IOException {
+        CommonStatsFlags statsFlags = new CommonStatsFlags();
+        statsFlags.includeAllCacheTypes();
+        String[] flagsLevels;
+        if (aggregationLevels == null) {
+            flagsLevels = null;
+        } else {
+            flagsLevels = aggregationLevels.toArray(new String[0]);
+        }
+        statsFlags.setLevels(flagsLevels);
+
+        NodesStatsResponse nodeStatsResponse = client.admin()
+            .cluster()
+            .prepareNodesStats("data:true")
+            .addMetric(NodesStatsRequest.Metric.CACHE_STATS.metricName())
+            .setIndices(statsFlags)
+            .get();
+        // Can always get the first data node as there's only one in this test suite
+        assertEquals(1, nodeStatsResponse.getNodes().size());
+        NodeCacheStats ncs = nodeStatsResponse.getNodes().get(0).getNodeCacheStats();
+        return ncs.getStatsByCache(CacheType.INDICES_REQUEST_CACHE);
     }
 
     private RequestCacheStats getRequestCacheStats(Client client, String indexName) {
