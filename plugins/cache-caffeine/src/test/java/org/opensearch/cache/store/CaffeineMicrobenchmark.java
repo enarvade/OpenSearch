@@ -18,19 +18,16 @@ import org.opensearch.common.util.FeatureFlags;
 import org.opensearch.test.OpenSearchTestCase;
 
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.function.ToLongBiFunction;
 
 
 public class CaffeineMicrobenchmark extends OpenSearchTestCase {
 
     private final String dimensionName = "shardId";
-    private static final int CACHE_SIZE_IN_BYTES = 1024 * 101;
-    private static final int MOCK_WEIGHT = 1000;
-    private static final int NUM_KEYS = 100000;
+    private static final int CACHE_SIZE_IN_BYTES = 20971520;
+    private static final int MOCK_WEIGHT = 10;
+    private static final int NUM_KEYS = 20000000;
 
     public void testCaffeine() throws IOException {
         ToLongBiFunction<ICacheKey<String>, String> weigher = getMockWeigher();
@@ -42,44 +39,54 @@ public class CaffeineMicrobenchmark extends OpenSearchTestCase {
             .setRemovalListener(removalListener)
             .build();
 
-        Map<String, String> keyValueMap = new HashMap<>();
+        ArrayList<ICacheKey<String>> keys = new ArrayList<>();
+        Map<ICacheKey<String>, String> keyValueMap = new HashMap<>();
         for (int i = 0; i < NUM_KEYS; i++) {
-            keyValueMap.put(UUID.randomUUID().toString(), UUID.randomUUID().toString());
+            ICacheKey<String> key = getICacheKey(UUID.randomUUID().toString());
+            keyValueMap.put(key, UUID.randomUUID().toString());
+            keys.add(key);
         }
 
+        Random rnd = new Random();
         long start = System.nanoTime();
-        for (Map.Entry<String, String> entry : keyValueMap.entrySet()) {
-            ICacheKey<String> iCacheKey = getICacheKey(entry.getKey());
-            cache.put(iCacheKey, entry.getValue());
-        }
-        for (Map.Entry<String, String> entry : keyValueMap.entrySet()) {
-            cache.get(getICacheKey(entry.getKey()));
+        for (int i = 0; i < NUM_KEYS / 2; i++) {
+            int index1 = rnd.nextInt(NUM_KEYS);
+            int index2 = rnd.nextInt(NUM_KEYS);
+            ICacheKey<String> key1 = keys.get(index1);
+            ICacheKey<String> key2 = keys.get(index2);
+            cache.put(key1, keyValueMap.get(key1));
+            cache.get(key2);
         }
         long end = System.nanoTime();
         System.out.println(end - start);
-        System.out.println(cache.stats().getTotalHits());
+        System.out.println((float) cache.stats().getTotalHits() / (NUM_KEYS / 2));
     }
 
     public void testDefault() throws IOException {
         MockRemovalListener<String, String> removalListener = new MockRemovalListener<>();
         ICache<String, String> cache = getCache(removalListener, true);
 
-        Map<String, String> keyValueMap = new HashMap<>();
+        ArrayList<ICacheKey<String>> keys = new ArrayList<>();
+        Map<ICacheKey<String>, String> keyValueMap = new HashMap<>();
         for (int i = 0; i < NUM_KEYS; i++) {
-            keyValueMap.put(UUID.randomUUID().toString(), UUID.randomUUID().toString());
+            ICacheKey<String> key = getICacheKey(UUID.randomUUID().toString());
+            keyValueMap.put(key, UUID.randomUUID().toString());
+            keys.add(key);
         }
 
+        Random rnd = new Random();
         long start = System.nanoTime();
-        for (Map.Entry<String, String> entry : keyValueMap.entrySet()) {
-            ICacheKey<String> iCacheKey = getICacheKey(entry.getKey());
-            cache.put(iCacheKey, entry.getValue());
-        }
-        for (Map.Entry<String, String> entry : keyValueMap.entrySet()) {
-            cache.get(getICacheKey(entry.getKey()));
+        for (int i = 0; i < NUM_KEYS / 2; i++) {
+            int index1 = rnd.nextInt(NUM_KEYS);
+            int index2 = rnd.nextInt(NUM_KEYS);
+            ICacheKey<String> key1 = keys.get(index1);
+            ICacheKey<String> key2 = keys.get(index2);
+            cache.put(key1, keyValueMap.get(key1));
+            cache.get(key2);
         }
         long end = System.nanoTime();
         System.out.println(end - start);
-        System.out.println(cache.stats().getTotalHits());
+        System.out.println((float) cache.stats().getTotalHits() / (NUM_KEYS / 2));
     }
 
     private OpenSearchOnHeapCache<String, String> getCache(
