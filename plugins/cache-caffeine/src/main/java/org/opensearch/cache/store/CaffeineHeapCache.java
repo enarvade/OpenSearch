@@ -61,7 +61,7 @@ public class CaffeineHeapCache<K, V> implements ICache<K, V> {
         if (builder.getStatsTrackingEnabled()) {
             // If this cache is being used, FeatureFlags.PLUGGABLE_CACHE is already on, so we can always use the DefaultCacheStatsHolder
             // unless statsTrackingEnabled is explicitly set to false in CacheConfig.
-            this.cacheStatsHolder = new DefaultCacheStatsHolder(dimensionNames, "caffeine_heap");
+            this.cacheStatsHolder = new DefaultCacheStatsHolder(dimensionNames, CaffeineHeapCacheFactory.NAME);
         } else {
             this.cacheStatsHolder = NoopCacheStatsHolder.getInstance();
         }
@@ -75,7 +75,7 @@ public class CaffeineHeapCache<K, V> implements ICache<K, V> {
                 .removalListener(this.caffeineRemovalListener)
                 .maximumWeight(builder.getMaxWeightInBytes())
                 .expireAfterAccess(builder.getExpireAfterAcess().duration(), builder.getExpireAfterAcess().timeUnit())
-                .weigher(new CaffeineWeigher(this.weigher))
+                .weigher(new CaffeineWeigher())
                 .executor(Runnable::run)
                 .build()
         );
@@ -85,15 +85,9 @@ public class CaffeineHeapCache<K, V> implements ICache<K, V> {
      * Wrapper over ICache weigher to be used by Caffeine
      */
     private class CaffeineWeigher implements Weigher<ICacheKey<K>, V> {
-        private final ToLongBiFunction<ICacheKey<K>, V> weigher;
-
-        private CaffeineWeigher(ToLongBiFunction<ICacheKey<K>, V> weigher) {
-            this.weigher = weigher;
-        }
-
         @Override
         public int weigh(ICacheKey<K> key, V value) {
-            return (int) this.weigher.applyAsLong(key, value);
+            return (int) weigher.applyAsLong(key, value);
         }
     }
 
@@ -132,8 +126,7 @@ public class CaffeineHeapCache<K, V> implements ICache<K, V> {
         if (key == null) {
             throw new IllegalArgumentException("Key passed to caffeine heap cache was null.");
         }
-        V value;
-        value = cache.getIfPresent(key);
+        V value = cache.getIfPresent(key);
         if (value != null) {
             cacheStatsHolder.incrementHits(key.dimensions);
         } else {
@@ -157,7 +150,6 @@ public class CaffeineHeapCache<K, V> implements ICache<K, V> {
 
     @Override
     public V computeIfAbsent(ICacheKey<K> key, LoadAwareCacheLoader<ICacheKey<K>, V> loader) {
-        V value;
         Function<ICacheKey<K>, V> mappingFunction = k -> {
             V loadedValue;
             try {
@@ -167,7 +159,7 @@ public class CaffeineHeapCache<K, V> implements ICache<K, V> {
             }
             return loadedValue;
         };
-        value = cache.get(key, mappingFunction);
+        V value = cache.get(key, mappingFunction);
         if (!loader.isLoaded()) {
             cacheStatsHolder.incrementHits(key.dimensions);
         } else {
