@@ -8,11 +8,7 @@
 
 package org.opensearch.cache.store;
 
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
-import com.github.benmanes.caffeine.cache.RemovalCause;
-import com.github.benmanes.caffeine.cache.RemovalListener;
-import com.github.benmanes.caffeine.cache.Weigher;
+import com.github.benmanes.caffeine.cache.*;
 
 import org.opensearch.OpenSearchException;
 import org.opensearch.cache.CaffeineHeapCacheSettings;
@@ -77,6 +73,7 @@ public class CaffeineHeapCache<K, V> implements ICache<K, V> {
                 .expireAfterAccess(builder.getExpireAfterAcess().duration(), builder.getExpireAfterAcess().timeUnit())
                 .weigher(new CaffeineWeigher())
                 .executor(Runnable::run)
+                .initialCapacity(1000000)
                 .build()
         );
     }
