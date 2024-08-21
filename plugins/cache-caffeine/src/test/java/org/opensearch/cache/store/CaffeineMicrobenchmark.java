@@ -31,6 +31,7 @@ public class CaffeineMicrobenchmark extends OpenSearchTestCase {
     private static final int MOCK_WEIGHT = 10;
     private static final int NUM_THREADS = 10;
     private static final int[] ITERATIONS = {500000, 5000000, 50000000};
+    private static final int RUNS = 10;
 
     public void test() throws IOException {
         ToLongBiFunction<ICacheKey<String>, String> weigher = getMockWeigher();
@@ -45,75 +46,77 @@ public class CaffeineMicrobenchmark extends OpenSearchTestCase {
         long end;
         int index1;
         int index2;
-        int index3;
         ICacheKey<String> key1;
         ICacheKey<String> key2;
-        ICacheKey<String> key3;
 
-        for (int iterations : ITERATIONS) {
-            int num_keys = iterations / 10;
-            keys = new ArrayList<>();
-            keyValueMap = new HashMap<>();
-            for (int i = 0; i < num_keys; i++) {
-                ICacheKey<String> key = getICacheKey(UUID.randomUUID().toString());
-                keyValueMap.put(key, UUID.randomUUID().toString());
-                keys.add(key);
+        for (int x = 10; x < 11; x++) {
+            for (int iterations : ITERATIONS) {
+                int num_keys = iterations / 10;
+                keys = new ArrayList<>();
+                keyValueMap = new HashMap<>();
+                for (int i = 0; i < num_keys; i++) {
+                    ICacheKey<String> key = getICacheKey(UUID.randomUUID().toString());
+                    keyValueMap.put(key, UUID.randomUUID().toString());
+                    keys.add(key);
+                }
+                keysSubset1 = keys.subList(0, num_keys / 10000);
+                keysSubset2 = keys.subList(num_keys / 10000, num_keys);
+
+                // Caffeine
+                cache = new CaffeineHeapCache.Builder<String, String>().setDimensionNames(List.of(dimensionName))
+                    .setExpireAfterAccess(TimeValue.MAX_VALUE)
+                    .setMaximumWeightInBytes(CACHE_SIZE_IN_BYTES)
+                    .setWeigher(weigher)
+                    .setRemovalListener(removalListener)
+                    .setStatsTrackingEnabled(true)
+                    .build();
+                rnd = new Random();
+                start = System.nanoTime();
+                for (int j = 0; j < iterations; j++) {
+                    index1 = rnd.nextInt(keysSubset1.size());
+                    index2 = rnd.nextInt(keysSubset1.size());
+                    key1 = keysSubset1.get(index1);
+                    key2 = keysSubset1.get(index2);
+                    cache.put(key1, keyValueMap.get(key1));
+                    cache.get(key2);
+                }
+                end = System.nanoTime();
+                System.out.println(
+                    x + ", "
+                        + "caffeine, "
+                        + iterations + ", "
+                        + num_keys + ", "
+                        + (end - start) + ", "
+                        + cache.stats().getTotalHits() + ", "
+                        + cache.stats().getTotalMisses() + ", "
+                        + cache.stats().getTotalEvictions()
+                );
+
+                // Default
+                cache = getCache(removalListener, true);
+                rnd = new Random();
+                start = System.nanoTime();
+                for (int j = 0; j < iterations; j++) {
+                    index1 = rnd.nextInt(keysSubset1.size());
+                    index2 = rnd.nextInt(keysSubset1.size());
+                    key1 = keysSubset1.get(index1);
+                    key2 = keysSubset1.get(index2);
+                    cache.put(key1, keyValueMap.get(key1));
+                    cache.get(key2);
+                }
+                end = System.nanoTime();
+                System.out.println(
+                    x + ", "
+                        + "default, "
+                        + iterations + ", "
+                        + num_keys + ", "
+                        + (end - start) + ", "
+                        + cache.stats().getTotalHits() + ", "
+                        + cache.stats().getTotalMisses() + ", "
+                        + cache.stats().getTotalEvictions()
+                );
             }
-
-            keysSubset1 = keys.subList(0, num_keys / 2);
-            keysSubset2 = keys.subList(num_keys / 2, num_keys);
-
-            // Caffeine
-            cache = new CaffeineHeapCache.Builder<String, String>().setDimensionNames(List.of(dimensionName))
-                .setExpireAfterAccess(TimeValue.MAX_VALUE)
-                .setMaximumWeightInBytes(CACHE_SIZE_IN_BYTES)
-                .setWeigher(weigher)
-                .setRemovalListener(removalListener)
-                .setStatsTrackingEnabled(true)
-                .build();
-            rnd = new Random();
-            start = System.nanoTime();
-            for (int j = 0; j < iterations; j++) {
-                index1 = rnd.nextInt(keysSubset1.size());
-                index2 = rnd.nextInt(keysSubset1.size());
-                key1 = keysSubset1.get(index1);
-                key2 = keysSubset1.get(index2);
-                cache.put(key1, keyValueMap.get(key1));
-                cache.get(key2);
-
-                index3 = rnd.nextInt(keysSubset2.size());
-                key3 = keysSubset2.get(index3);
-                cache.get(key3);
-            }
-            end = System.nanoTime();
-            System.out.println("cache=caffeine, "
-                + "iterations=" + iterations + ", "
-                + "keys=" + num_keys + ", "
-                + "latency=" + (end - start) + ", "
-                + cache.stats().getTotalStats());
-
-            // Default
-            cache = getCache(removalListener, true);
-            rnd = new Random();
-            start = System.nanoTime();
-            for (int j = 0; j < iterations; j++) {
-                index1 = rnd.nextInt(keysSubset1.size());
-                index2 = rnd.nextInt(keysSubset1.size());
-                key1 = keysSubset1.get(index1);
-                key2 = keysSubset1.get(index2);
-                cache.put(key1, keyValueMap.get(key1));
-                cache.get(key2);
-
-                index3 = rnd.nextInt(keysSubset2.size());
-                key3 = keysSubset2.get(index3);
-                cache.get(key3);
-            }
-            end = System.nanoTime();
-            System.out.println("cache=default, "
-                + "iterations=" + iterations + ", "
-                + "keys=" + num_keys + ", "
-                + "latency=" + (end - start) + ", "
-                + cache.stats().getTotalStats());        }
+        }
     }
 
     /*
