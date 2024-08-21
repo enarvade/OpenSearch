@@ -27,23 +27,43 @@ import java.util.function.ToLongBiFunction;
 public class CaffeineMicrobenchmark extends OpenSearchTestCase {
 
     private final String dimensionName = "shardId";
-    private static final int CACHE_SIZE_IN_BYTES = 20971520;
+    private static final int CACHE_SIZE_IN_BYTES = 50000000;
     private static final int MOCK_WEIGHT = 10;
-    private static final int NUM_KEYS = 1000000;
     private static final int NUM_THREADS = 10;
-    private static final int ITERATIONS = 1000000;
+    private static final int[] ITERATIONS = {500000, 5000000, 50000000};
 
     public void test() throws IOException {
         ToLongBiFunction<ICacheKey<String>, String> weigher = getMockWeigher();
         MockRemovalListener<String, String> removalListener = new MockRemovalListener<>();
         ICache<String, String> cache;
         ArrayList<ICacheKey<String>> keys;
+        List<ICacheKey<String>> keysSubset1;
+        List<ICacheKey<String>> keysSubset2;
         Map<ICacheKey<String>, String> keyValueMap;
-        long caffeine_result;
-        long default_result;
+        Random rnd;
+        long start;
+        long end;
+        int index1;
+        int index2;
+        int index3;
+        ICacheKey<String> key1;
+        ICacheKey<String> key2;
+        ICacheKey<String> key3;
 
-        for (int x = 0; x < 10; x++) {
-            // Caffeine Cache Run
+        for (int iterations : ITERATIONS) {
+            int num_keys = iterations / 10;
+            keys = new ArrayList<>();
+            keyValueMap = new HashMap<>();
+            for (int i = 0; i < num_keys; i++) {
+                ICacheKey<String> key = getICacheKey(UUID.randomUUID().toString());
+                keyValueMap.put(key, UUID.randomUUID().toString());
+                keys.add(key);
+            }
+
+            keysSubset1 = keys.subList(0, num_keys / 2);
+            keysSubset2 = keys.subList(num_keys / 2, num_keys);
+
+            // Caffeine
             cache = new CaffeineHeapCache.Builder<String, String>().setDimensionNames(List.of(dimensionName))
                 .setExpireAfterAccess(TimeValue.MAX_VALUE)
                 .setMaximumWeightInBytes(CACHE_SIZE_IN_BYTES)
@@ -51,46 +71,52 @@ public class CaffeineMicrobenchmark extends OpenSearchTestCase {
                 .setRemovalListener(removalListener)
                 .setStatsTrackingEnabled(true)
                 .build();
-
-            keys = new ArrayList<>();
-            keyValueMap = new HashMap<>();
-            for (int i = 0; i < NUM_KEYS; i++) {
-                ICacheKey<String> key = getICacheKey(UUID.randomUUID().toString());
-                keyValueMap.put(key, UUID.randomUUID().toString());
-                keys.add(key);
-            }
-
-            Random rnd = new Random();
-            long start = System.nanoTime();
-            for (int i = 0; i < NUM_KEYS / 2; i++) {
-                int index1 = rnd.nextInt(NUM_KEYS);
-                int index2 = rnd.nextInt(NUM_KEYS);
-                ICacheKey<String> key1 = keys.get(index1);
-                ICacheKey<String> key2 = keys.get(index2);
+            rnd = new Random();
+            start = System.nanoTime();
+            for (int j = 0; j < iterations; j++) {
+                index1 = rnd.nextInt(keysSubset1.size());
+                index2 = rnd.nextInt(keysSubset1.size());
+                key1 = keysSubset1.get(index1);
+                key2 = keysSubset1.get(index2);
                 cache.put(key1, keyValueMap.get(key1));
                 cache.get(key2);
-            }
-            long end = System.nanoTime();
-            caffeine_result = end - start;
 
-            // Default Cache Run
+                index3 = rnd.nextInt(keysSubset2.size());
+                key3 = keysSubset2.get(index3);
+                cache.get(key3);
+            }
+            end = System.nanoTime();
+            System.out.println("cache=caffeine, "
+                + "iterations=" + iterations + ", "
+                + "keys=" + num_keys + ", "
+                + "latency=" + (end - start) + ", "
+                + cache.stats().getTotalStats());
+
+            // Default
             cache = getCache(removalListener, true);
             rnd = new Random();
             start = System.nanoTime();
-            for (int i = 0; i < NUM_KEYS / 2; i++) {
-                int index1 = rnd.nextInt(NUM_KEYS);
-                int index2 = rnd.nextInt(NUM_KEYS);
-                ICacheKey<String> key1 = keys.get(index1);
-                ICacheKey<String> key2 = keys.get(index2);
+            for (int j = 0; j < iterations; j++) {
+                index1 = rnd.nextInt(keysSubset1.size());
+                index2 = rnd.nextInt(keysSubset1.size());
+                key1 = keysSubset1.get(index1);
+                key2 = keysSubset1.get(index2);
                 cache.put(key1, keyValueMap.get(key1));
                 cache.get(key2);
+
+                index3 = rnd.nextInt(keysSubset2.size());
+                key3 = keysSubset2.get(index3);
+                cache.get(key3);
             }
             end = System.nanoTime();
-            default_result = end - start;
-            System.out.println((float) default_result / (float) caffeine_result);
-        }
+            System.out.println("cache=default, "
+                + "iterations=" + iterations + ", "
+                + "keys=" + num_keys + ", "
+                + "latency=" + (end - start) + ", "
+                + cache.stats().getTotalStats());        }
     }
 
+    /*
     public void testConcurrent() throws Exception {
         ToLongBiFunction<ICacheKey<String>, String> weigher = getMockWeigher();
         MockRemovalListener<String, String> removalListener = new MockRemovalListener<>();
@@ -176,6 +202,9 @@ public class CaffeineMicrobenchmark extends OpenSearchTestCase {
         }
     }
 
+     */
+
+    /*
     public void testGets() throws Exception {
         ToLongBiFunction<ICacheKey<String>, String> weigher = getMockWeigher();
         MockRemovalListener<String, String> removalListener = new MockRemovalListener<>();
@@ -217,6 +246,8 @@ public class CaffeineMicrobenchmark extends OpenSearchTestCase {
             System.out.println((float) default_result / (float) caffeine_result);
         }
     }
+
+     */
 
     private OpenSearchOnHeapCache<String, String> getCache(
         MockRemovalListener<String, String> listener,

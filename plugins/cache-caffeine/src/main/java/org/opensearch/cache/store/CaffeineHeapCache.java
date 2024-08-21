@@ -73,7 +73,6 @@ public class CaffeineHeapCache<K, V> implements ICache<K, V> {
                 .expireAfterAccess(builder.getExpireAfterAcess().duration(), builder.getExpireAfterAcess().timeUnit())
                 .weigher(new CaffeineWeigher())
                 .executor(Runnable::run)
-                .initialCapacity(1000000)
                 .build()
         );
     }
@@ -139,6 +138,9 @@ public class CaffeineHeapCache<K, V> implements ICache<K, V> {
         }
         if (value == null) {
             throw new IllegalArgumentException("Value passed to caffeine heap cache was null.");
+        }
+        if (cache.getIfPresent(key) != null) {
+            cache.invalidate(key);
         }
         cache.put(key, value);
         cacheStatsHolder.incrementItems(key.dimensions);
