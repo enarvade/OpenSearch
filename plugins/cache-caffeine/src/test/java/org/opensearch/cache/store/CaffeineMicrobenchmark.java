@@ -21,19 +21,21 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Phaser;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.ToLongBiFunction;
 
 
 public class CaffeineMicrobenchmark extends OpenSearchTestCase {
 
     private final String dimensionName = "shardId";
-    private static final int CACHE_SIZE_IN_BYTES = 50000000;
+    private static final int CACHE_SIZE_IN_BYTES = 500;
     private static final int MOCK_WEIGHT = 10;
-    private static final int NUM_THREADS = 10;
-    private static final int[] ITERATIONS = {500000, 5000000, 50000000};
+    private static final int NUM_THREADS = 2;
+    private static final int[] ITERATIONS = {1000000, 10000000, 100000000};
     private static final int RUNS = 10;
 
-    public void test() throws IOException {
+    public void test() throws Exception {
         ToLongBiFunction<ICacheKey<String>, String> weigher = getMockWeigher();
         MockRemovalListener<String, String> removalListener = new MockRemovalListener<>();
         ICache<String, String> cache;
@@ -49,7 +51,7 @@ public class CaffeineMicrobenchmark extends OpenSearchTestCase {
         ICacheKey<String> key1;
         ICacheKey<String> key2;
 
-        for (int x = 10; x < 11; x++) {
+        for (int x = 1; x <= RUNS ; x++) {
             for (int iterations : ITERATIONS) {
                 int num_keys = iterations / 10;
                 keys = new ArrayList<>();
@@ -59,8 +61,8 @@ public class CaffeineMicrobenchmark extends OpenSearchTestCase {
                     keyValueMap.put(key, UUID.randomUUID().toString());
                     keys.add(key);
                 }
-                keysSubset1 = keys.subList(0, num_keys / 10000);
-                keysSubset2 = keys.subList(num_keys / 10000, num_keys);
+                keysSubset1 = keys.subList(0, num_keys / 2);
+                keysSubset2 = keys.subList(num_keys / 2, num_keys);
 
                 // Caffeine
                 cache = new CaffeineHeapCache.Builder<String, String>().setDimensionNames(List.of(dimensionName))
@@ -104,6 +106,131 @@ public class CaffeineMicrobenchmark extends OpenSearchTestCase {
                     cache.put(key1, keyValueMap.get(key1));
                     cache.get(key2);
                 }
+                end = System.nanoTime();
+                System.out.println(
+                    x + ", "
+                        + "default, "
+                        + iterations + ", "
+                        + num_keys + ", "
+                        + (end - start) + ", "
+                        + cache.stats().getTotalHits() + ", "
+                        + cache.stats().getTotalMisses() + ", "
+                        + cache.stats().getTotalEvictions()
+                );
+            }
+        }
+    }
+
+    public void testConcurrent() throws Exception {
+        ToLongBiFunction<ICacheKey<String>, String> weigher = getMockWeigher();
+        MockRemovalListener<String, String> removalListener = new MockRemovalListener<>();
+        ICache<String, String> cache;
+        ArrayList<ICacheKey<String>> keys;
+        List<ICacheKey<String>> keysSubset1;
+        List<ICacheKey<String>> keysSubset2;
+        Map<ICacheKey<String>, String> keyValueMap;
+        long start;
+        long end;
+        Thread[] threads;
+        Phaser phaser;
+        CountDownLatch countDownLatch;
+        int j;
+
+        for (int x = 1; x <= RUNS ; x++) {
+            for (int iterations : ITERATIONS) {
+                int num_keys = iterations / 10;
+                keys = new ArrayList<>();
+                keyValueMap = new HashMap<>();
+                for (int i = 0; i < num_keys; i++) {
+                    ICacheKey<String> key = getICacheKey(UUID.randomUUID().toString());
+                    keyValueMap.put(key, UUID.randomUUID().toString());
+                    keys.add(key);
+                }
+                keysSubset1 = keys.subList(0, num_keys / 100);
+                keysSubset2 = keys.subList(num_keys / 100, num_keys);
+
+                // Caffeine
+                cache = new CaffeineHeapCache.Builder<String, String>().setDimensionNames(List.of(dimensionName))
+                    .setExpireAfterAccess(TimeValue.MAX_VALUE)
+                    .setMaximumWeightInBytes(CACHE_SIZE_IN_BYTES)
+                    .setWeigher(weigher)
+                    .setRemovalListener(removalListener)
+                    .setStatsTrackingEnabled(true)
+                    .build();
+                threads = new Thread[NUM_THREADS];
+                phaser = new Phaser(NUM_THREADS + 1);
+                countDownLatch = new CountDownLatch(NUM_THREADS);
+                j = 0;
+                start = System.nanoTime();
+                for (int i = 0; i < NUM_THREADS; i++) {
+                    Map<ICacheKey<String>, String> finalKeyValueMap = keyValueMap;
+                    List<ICacheKey<String>> finalKeysSubset1 = keysSubset1;
+                    List<ICacheKey<String>> finalKeysSubset2 = keysSubset2;
+                    ICache<String, String> finalCache = cache;
+                    CountDownLatch finalCountDownLatch1 = countDownLatch;
+                    Phaser finalPhaser1 = phaser;
+                    threads[j] = new Thread(() -> {
+                        finalPhaser1.arriveAndAwaitAdvance();
+                        for (int k = 0; k < iterations / NUM_THREADS; k++) {
+                            Random rnd = new Random();
+                            int index1 = rnd.nextInt(finalKeysSubset2.size());
+                            int index2 = rnd.nextInt(finalKeysSubset1.size());
+                            ICacheKey<String> key1 = finalKeysSubset2.get(index1);
+                            ICacheKey<String> key2 = finalKeysSubset1.get(index2);
+                            finalCache.put(key1, finalKeyValueMap.get(key1));
+                            finalCache.get(key2);
+                        }
+                        finalCountDownLatch1.countDown();
+                    });
+                    threads[j].start();
+                    j++;
+                }
+                phaser.arriveAndAwaitAdvance(); // Will trigger parallel puts above.
+                countDownLatch.await(); // Wait for all threads to finish
+                end = System.nanoTime();
+                System.out.println(
+                    x + ", "
+                        + "caffeine, "
+                        + iterations + ", "
+                        + num_keys + ", "
+                        + (end - start) + ", "
+                        + cache.stats().getTotalHits() + ", "
+                        + cache.stats().getTotalMisses() + ", "
+                        + cache.stats().getTotalEvictions()
+                );
+
+                // Default
+                cache = getCache(removalListener, true);
+                threads = new Thread[NUM_THREADS];
+                phaser = new Phaser(NUM_THREADS + 1);
+                countDownLatch = new CountDownLatch(NUM_THREADS);
+                j = 0;
+                start = System.nanoTime();
+                for (int i = 0; i < NUM_THREADS; i++) {
+                    Map<ICacheKey<String>, String> finalKeyValueMap = keyValueMap;
+                    List<ICacheKey<String>> finalKeysSubset1 = keysSubset1;
+                    List<ICacheKey<String>> finalKeysSubset2 = keysSubset2;
+                    ICache<String, String> finalCache = cache;
+                    CountDownLatch finalCountDownLatch1 = countDownLatch;
+                    Phaser finalPhaser1 = phaser;
+                    threads[j] = new Thread(() -> {
+                        finalPhaser1.arriveAndAwaitAdvance();
+                        for (int k = 0; k < iterations / NUM_THREADS; k++) {
+                            Random rnd = new Random();
+                            int index1 = rnd.nextInt(finalKeysSubset2.size());
+                            int index2 = rnd.nextInt(finalKeysSubset1.size());
+                            ICacheKey<String> key1 = finalKeysSubset2.get(index1);
+                            ICacheKey<String> key2 = finalKeysSubset1.get(index2);
+                            finalCache.put(key1, finalKeyValueMap.get(key1));
+                            finalCache.get(key2);
+                        }
+                        finalCountDownLatch1.countDown();
+                    });
+                    threads[j].start();
+                    j++;
+                }
+                phaser.arriveAndAwaitAdvance(); // Will trigger parallel puts above.
+                countDownLatch.await(); // Wait for all threads to finish
                 end = System.nanoTime();
                 System.out.println(
                     x + ", "
