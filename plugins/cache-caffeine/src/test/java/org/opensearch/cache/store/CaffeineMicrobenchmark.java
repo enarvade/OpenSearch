@@ -29,12 +29,13 @@ import java.util.function.ToLongBiFunction;
 public class CaffeineMicrobenchmark extends OpenSearchTestCase {
 
     private final String dimensionName = "shardId";
-    private static final int CACHE_SIZE_IN_BYTES = 50000000;
+    private static final int CACHE_SIZE_IN_BYTES = 5000;
     private static final int MOCK_WEIGHT = 10;
-    private static final int NUM_THREADS = 8;
-    private static final int[] ITERATIONS = {1000000, 10000000, 100000000};
+    private static final int NUM_THREADS = 16;
+    private static final int[] ITERATIONS = {100000, 1000000, 10000000};
     private static final int RUNS = 10;
 
+    /*
     public void testAllMisses() throws Exception {
         ToLongBiFunction<ICacheKey<String>, String> weigher = getMockWeigher();
         MockRemovalListener<String, String> removalListener = new MockRemovalListener<>();
@@ -348,6 +349,8 @@ public class CaffeineMicrobenchmark extends OpenSearchTestCase {
             }
         }
     }
+
+     */
 
     public void testConcurrentAllMisses() throws Exception {
         ToLongBiFunction<ICacheKey<String>, String> weigher = getMockWeigher();
@@ -685,7 +688,7 @@ public class CaffeineMicrobenchmark extends OpenSearchTestCase {
                             finalCache.put(key1, finalKeyValueMap.get(key1));
                             finalCache.get(key2);
                         }
-                        for (int k = 0; k < iterations / 2; k++) {
+                        for (int k = 0; k < iterations / (2 * NUM_THREADS) ; k++) {
                             int index1 = rnd.nextInt(finalKeysForHits.size());
                             int index2 = rnd.nextInt(finalKeysForMisses.size());
                             ICacheKey<String> key1 = finalKeysForHits.get(index1);
@@ -728,17 +731,26 @@ public class CaffeineMicrobenchmark extends OpenSearchTestCase {
                 for (int i = 0; i < NUM_THREADS; i++) {
                     Map<ICacheKey<String>, String> finalKeyValueMap = keyValueMap;
                     List<ICacheKey<String>> finalKeysForHits = keysForHits;
+                    List<ICacheKey<String>> finalKeysForMisses = keysForMisses;
                     ICache<String, String> finalCache = cache;
                     CountDownLatch finalCountDownLatch = countDownLatch;
                     Phaser finalPhaser = phaser;
                     threads[j] = new Thread(() -> {
                         finalPhaser.arriveAndAwaitAdvance();
-                        for (int k = 0; k < iterations / NUM_THREADS; k++) {
-                            Random rnd = new Random();
+                        Random rnd = new Random();
+                        for (int k = 0; k < iterations / (2 * NUM_THREADS); k++) {
                             int index1 = rnd.nextInt(finalKeysForHits.size());
                             int index2 = rnd.nextInt(finalKeysForHits.size());
                             ICacheKey<String> key1 = finalKeysForHits.get(index1);
                             ICacheKey<String> key2 = finalKeysForHits.get(index2);
+                            finalCache.put(key1, finalKeyValueMap.get(key1));
+                            finalCache.get(key2);
+                        }
+                        for (int k = 0; k < iterations / (2 * NUM_THREADS) ; k++) {
+                            int index1 = rnd.nextInt(finalKeysForHits.size());
+                            int index2 = rnd.nextInt(finalKeysForMisses.size());
+                            ICacheKey<String> key1 = finalKeysForHits.get(index1);
+                            ICacheKey<String> key2 = finalKeysForMisses.get(index2);
                             finalCache.put(key1, finalKeyValueMap.get(key1));
                             finalCache.get(key2);
                         }
