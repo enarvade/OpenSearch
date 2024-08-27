@@ -155,140 +155,6 @@ public class CaffeineMicrobenchmark extends OpenSearchTestCase {
     }
 
     public void testAllHits() throws Exception {
-        ToLongBiFunction<ICacheKey<String>, String> weigher = getMockWeigher();
-        MockRemovalListener<String, String> removalListener = new MockRemovalListener<>();
-        ICache<String, String> cache;
-        ArrayList<ICacheKey<String>> keys;
-        List<ICacheKey<String>> keysForHits;
-        Map<ICacheKey<String>, String> keyValueMap;
-        long start;
-        long end;
-        Thread[] threads;
-        Phaser phaser;
-        CountDownLatch countDownLatch;
-        int j;
-
-        for (int x = 1; x <= RUNS ; x++) {
-            for (int iterations : ITERATIONS) {
-                int num_keys = iterations / 10;
-                keys = new ArrayList<>();
-                keyValueMap = new HashMap<>();
-                for (int i = 0; i < num_keys; i++) {
-                    ICacheKey<String> key = getICacheKey(UUID.randomUUID().toString());
-                    keyValueMap.put(key, UUID.randomUUID().toString());
-                    keys.add(key);
-                }
-                keysForHits = keys.subList(0, num_keys / 10);
-
-                // Caffeine
-                cache = new CaffeineHeapCache.Builder<String, String>().setDimensionNames(List.of(dimensionName))
-                    .setExpireAfterAccess(TimeValue.MAX_VALUE)
-                    .setMaximumWeightInBytes(CACHE_SIZE_IN_BYTES)
-                    .setWeigher(weigher)
-                    .setRemovalListener(removalListener)
-                    .setStatsTrackingEnabled(true)
-                    .build();
-                for (int i = 0; i < keysForHits.size(); i++) {
-                    ICacheKey<String> key = keysForHits.get(i);
-                    String value = keyValueMap.get(key);
-                    cache.put(key, value);
-                }
-
-                threads = new Thread[NUM_THREADS];
-                phaser = new Phaser(NUM_THREADS + 1);
-                countDownLatch = new CountDownLatch(NUM_THREADS);
-                j = 0;
-                start = System.nanoTime();
-                for (int i = 0; i < NUM_THREADS; i++) {
-                    Map<ICacheKey<String>, String> finalKeyValueMap = keyValueMap;
-                    List<ICacheKey<String>> finalKeysForHits = keysForHits;
-                    ICache<String, String> finalCache = cache;
-                    CountDownLatch finalCountDownLatch = countDownLatch;
-                    Phaser finalPhaser = phaser;
-                    threads[j] = new Thread(() -> {
-                        finalPhaser.arriveAndAwaitAdvance();
-                        for (int k = 0; k < iterations / NUM_THREADS; k++) {
-                            Random rnd = new Random();
-                            int index1 = rnd.nextInt(finalKeysForHits.size());
-                            int index2 = rnd.nextInt(finalKeysForHits.size());
-                            ICacheKey<String> key1 = finalKeysForHits.get(index1);
-                            ICacheKey<String> key2 = finalKeysForHits.get(index2);
-                            finalCache.put(key1, finalKeyValueMap.get(key1));
-                            finalCache.get(key2);
-                        }
-                        finalCountDownLatch.countDown();
-                    });
-                    threads[j].start();
-                    j++;
-                }
-                phaser.arriveAndAwaitAdvance(); // Will trigger parallel puts above.
-                countDownLatch.await(); // Wait for all threads to finish
-                end = System.nanoTime();
-                System.out.println(
-                    x + ", "
-                        + "caffeine, "
-                        + iterations + ", "
-                        + num_keys + ", "
-                        + (end - start) + ", "
-                        + cache.stats().getTotalHits() + ", "
-                        + cache.stats().getTotalMisses() + ", "
-                        + cache.stats().getTotalEvictions()
-                );
-
-                // Default
-                cache = getDefaultCache(removalListener, true);
-                for (int i = 0; i < keysForHits.size(); i++) {
-                    ICacheKey<String> key = keysForHits.get(i);
-                    String value = keyValueMap.get(key);
-                    cache.put(key, value);
-                }
-                threads = new Thread[NUM_THREADS];
-                phaser = new Phaser(NUM_THREADS + 1);
-                countDownLatch = new CountDownLatch(NUM_THREADS);
-
-                j = 0;
-                start = System.nanoTime();
-                for (int i = 0; i < NUM_THREADS; i++) {
-                    Map<ICacheKey<String>, String> finalKeyValueMap = keyValueMap;
-                    List<ICacheKey<String>> finalKeysForHits = keysForHits;
-                    ICache<String, String> finalCache = cache;
-                    CountDownLatch finalCountDownLatch = countDownLatch;
-                    Phaser finalPhaser = phaser;
-                    threads[j] = new Thread(() -> {
-                        finalPhaser.arriveAndAwaitAdvance();
-                        for (int k = 0; k < iterations / NUM_THREADS; k++) {
-                            Random rnd = new Random();
-                            int index1 = rnd.nextInt(finalKeysForHits.size());
-                            int index2 = rnd.nextInt(finalKeysForHits.size());
-                            ICacheKey<String> key1 = finalKeysForHits.get(index1);
-                            ICacheKey<String> key2 = finalKeysForHits.get(index2);
-                            finalCache.put(key1, finalKeyValueMap.get(key1));
-                            finalCache.get(key2);
-                        }
-                        finalCountDownLatch.countDown();
-                    });
-                    threads[j].start();
-                    j++;
-                }
-                phaser.arriveAndAwaitAdvance(); // Will trigger parallel puts above.
-                countDownLatch.await(); // Wait for all threads to finish
-                end = System.nanoTime();
-                System.out.println(
-                    x + ", "
-                        + "default, "
-                        + iterations + ", "
-                        + num_keys + ", "
-                        + (end - start) + ", "
-                        + cache.stats().getTotalHits() + ", "
-                        + cache.stats().getTotalMisses() + ", "
-                        + cache.stats().getTotalEvictions()
-                );
-            }
-        }
-    }
-
-    public void testHalfHits() throws Exception {
-        ToLongBiFunction<ICacheKey<String>, String> weigher = getMockWeigher();
         MockRemovalListener<String, String> removalListener = new MockRemovalListener<>();
         ICache<String, String> cache;
         ArrayList<ICacheKey<String>> keys;
@@ -316,13 +182,9 @@ public class CaffeineMicrobenchmark extends OpenSearchTestCase {
                 keysForMisses = keys.subList(num_keys / 10, num_keys);
 
                 // Caffeine
-                cache = new CaffeineHeapCache.Builder<String, String>().setDimensionNames(List.of(dimensionName))
-                    .setExpireAfterAccess(TimeValue.MAX_VALUE)
-                    .setMaximumWeightInBytes(CACHE_SIZE_IN_BYTES)
-                    .setWeigher(weigher)
-                    .setRemovalListener(removalListener)
-                    .setStatsTrackingEnabled(true)
-                    .build();
+                cache = getCaffeineCache(removalListener, true);
+
+                // Prepopulate the cache
                 for (int i = 0; i < keysForHits.size(); i++) {
                     ICacheKey<String> key = keysForHits.get(i);
                     String value = keyValueMap.get(key);
@@ -335,39 +197,23 @@ public class CaffeineMicrobenchmark extends OpenSearchTestCase {
                 j = 0;
                 start = System.nanoTime();
                 for (int i = 0; i < NUM_THREADS; i++) {
-                    Map<ICacheKey<String>, String> finalKeyValueMap = keyValueMap;
                     List<ICacheKey<String>> finalKeysForHits = keysForHits;
-                    List<ICacheKey<String>> finalKeysForMisses = keysForMisses;
                     ICache<String, String> finalCache = cache;
                     CountDownLatch finalCountDownLatch = countDownLatch;
                     Phaser finalPhaser = phaser;
                     threads[j] = new Thread(() -> {
                         finalPhaser.arriveAndAwaitAdvance();
-                        Random rnd = new Random();
-                        for (int k = 0; k < iterations / (2 * NUM_THREADS); k++) {
-                            int index1 = rnd.nextInt(finalKeysForHits.size());
-                            int index2 = rnd.nextInt(finalKeysForHits.size());
-                            ICacheKey<String> key1 = finalKeysForHits.get(index1);
-                            ICacheKey<String> key2 = finalKeysForHits.get(index2);
-                            finalCache.put(key1, finalKeyValueMap.get(key1));
-                            finalCache.get(key2);
-                        }
-                        for (int k = 0; k < iterations / (2 * NUM_THREADS) ; k++) {
-                            int index1 = rnd.nextInt(finalKeysForHits.size());
-                            int index2 = rnd.nextInt(finalKeysForMisses.size());
-                            ICacheKey<String> key1 = finalKeysForHits.get(index1);
-                            ICacheKey<String> key2 = finalKeysForMisses.get(index2);
-                            finalCache.put(key1, finalKeyValueMap.get(key1));
-                            finalCache.get(key2);
-                        }
+                        reads(finalCache, finalKeysForHits, iterations);
                         finalCountDownLatch.countDown();
                     });
                     threads[j].start();
                     j++;
                 }
-                phaser.arriveAndAwaitAdvance(); // Will trigger parallel puts above.
+                phaser.arriveAndAwaitAdvance(); // Will trigger parallel gets above
                 countDownLatch.await(); // Wait for all threads to finish
                 end = System.nanoTime();
+
+                // Print caffeine results
                 System.out.println(
                     x + ", "
                         + "caffeine, "
@@ -381,51 +227,161 @@ public class CaffeineMicrobenchmark extends OpenSearchTestCase {
 
                 // Default
                 cache = getDefaultCache(removalListener, true);
+
+                // Prepopulate the cache
                 for (int i = 0; i < keysForHits.size(); i++) {
                     ICacheKey<String> key = keysForHits.get(i);
                     String value = keyValueMap.get(key);
                     cache.put(key, value);
                 }
+
                 threads = new Thread[NUM_THREADS];
                 phaser = new Phaser(NUM_THREADS + 1);
                 countDownLatch = new CountDownLatch(NUM_THREADS);
-
                 j = 0;
+
                 start = System.nanoTime();
                 for (int i = 0; i < NUM_THREADS; i++) {
-                    Map<ICacheKey<String>, String> finalKeyValueMap = keyValueMap;
                     List<ICacheKey<String>> finalKeysForHits = keysForHits;
-                    List<ICacheKey<String>> finalKeysForMisses = keysForMisses;
                     ICache<String, String> finalCache = cache;
                     CountDownLatch finalCountDownLatch = countDownLatch;
                     Phaser finalPhaser = phaser;
                     threads[j] = new Thread(() -> {
                         finalPhaser.arriveAndAwaitAdvance();
-                        Random rnd = new Random();
-                        for (int k = 0; k < iterations / (2 * NUM_THREADS); k++) {
-                            int index1 = rnd.nextInt(finalKeysForHits.size());
-                            int index2 = rnd.nextInt(finalKeysForHits.size());
-                            ICacheKey<String> key1 = finalKeysForHits.get(index1);
-                            ICacheKey<String> key2 = finalKeysForHits.get(index2);
-                            finalCache.put(key1, finalKeyValueMap.get(key1));
-                            finalCache.get(key2);
-                        }
-                        for (int k = 0; k < iterations / (2 * NUM_THREADS) ; k++) {
-                            int index1 = rnd.nextInt(finalKeysForHits.size());
-                            int index2 = rnd.nextInt(finalKeysForMisses.size());
-                            ICacheKey<String> key1 = finalKeysForHits.get(index1);
-                            ICacheKey<String> key2 = finalKeysForMisses.get(index2);
-                            finalCache.put(key1, finalKeyValueMap.get(key1));
-                            finalCache.get(key2);
-                        }
+                        reads(finalCache, finalKeysForHits, iterations);
                         finalCountDownLatch.countDown();
                     });
                     threads[j].start();
                     j++;
                 }
-                phaser.arriveAndAwaitAdvance(); // Will trigger parallel puts above.
+                phaser.arriveAndAwaitAdvance(); // Will trigger parallel gets above
                 countDownLatch.await(); // Wait for all threads to finish
                 end = System.nanoTime();
+
+                // Print default results
+                System.out.println(
+                    x + ", "
+                        + "default, "
+                        + iterations + ", "
+                        + num_keys + ", "
+                        + (end - start) + ", "
+                        + cache.stats().getTotalHits() + ", "
+                        + cache.stats().getTotalMisses() + ", "
+                        + cache.stats().getTotalEvictions()
+                );
+            }
+        }
+    }
+
+    public void testHalfHits() throws Exception {
+        MockRemovalListener<String, String> removalListener = new MockRemovalListener<>();
+        ICache<String, String> cache;
+        ArrayList<ICacheKey<String>> keys;
+        List<ICacheKey<String>> keysForHits;
+        List<ICacheKey<String>> keysForMisses;
+        Map<ICacheKey<String>, String> keyValueMap;
+        long start;
+        long end;
+        Thread[] threads;
+        Phaser phaser;
+        CountDownLatch countDownLatch;
+        int j;
+
+        for (int x = 1; x <= RUNS ; x++) {
+            for (int iterations : ITERATIONS) {
+                int num_keys = iterations / 10;
+                keys = new ArrayList<>();
+                keyValueMap = new HashMap<>();
+                for (int i = 0; i < num_keys; i++) {
+                    ICacheKey<String> key = getICacheKey(UUID.randomUUID().toString());
+                    keyValueMap.put(key, UUID.randomUUID().toString());
+                    keys.add(key);
+                }
+                keysForHits = keys.subList(0, num_keys / 10);
+                keysForMisses = keys.subList(num_keys / 10, num_keys);
+
+                // Caffeine
+                cache = getCaffeineCache(removalListener, true);
+
+                // Prepopulate the cache
+                for (int i = 0; i < keysForHits.size(); i++) {
+                    ICacheKey<String> key = keysForHits.get(i);
+                    String value = keyValueMap.get(key);
+                    cache.put(key, value);
+                }
+
+                threads = new Thread[NUM_THREADS];
+                phaser = new Phaser(NUM_THREADS + 1);
+                countDownLatch = new CountDownLatch(NUM_THREADS);
+                j = 0;
+                start = System.nanoTime();
+                for (int i = 0; i < NUM_THREADS; i++) {
+                    List<ICacheKey<String>> finalKeysForHits = keysForHits;
+                    List<ICacheKey<String>> finalKeysForMisses= keysForMisses;
+                    ICache<String, String> finalCache = cache;
+                    CountDownLatch finalCountDownLatch = countDownLatch;
+                    Phaser finalPhaser = phaser;
+                    threads[j] = new Thread(() -> {
+                        finalPhaser.arriveAndAwaitAdvance();
+                        reads(finalCache, finalKeysForHits, iterations / 2);
+                        reads(finalCache, finalKeysForMisses, iterations / 2);
+                        finalCountDownLatch.countDown();
+                    });
+                    threads[j].start();
+                    j++;
+                }
+                phaser.arriveAndAwaitAdvance(); // Will trigger parallel gets above
+                countDownLatch.await(); // Wait for all threads to finish
+                end = System.nanoTime();
+
+                // Print caffeine results
+                System.out.println(
+                    x + ", "
+                        + "caffeine, "
+                        + iterations + ", "
+                        + num_keys + ", "
+                        + (end - start) + ", "
+                        + cache.stats().getTotalHits() + ", "
+                        + cache.stats().getTotalMisses() + ", "
+                        + cache.stats().getTotalEvictions()
+                );
+
+                // Default
+                cache = getDefaultCache(removalListener, true);
+
+                // Prepopulate the cache
+                for (int i = 0; i < keysForHits.size(); i++) {
+                    ICacheKey<String> key = keysForHits.get(i);
+                    String value = keyValueMap.get(key);
+                    cache.put(key, value);
+                }
+
+                threads = new Thread[NUM_THREADS];
+                phaser = new Phaser(NUM_THREADS + 1);
+                countDownLatch = new CountDownLatch(NUM_THREADS);
+                j = 0;
+
+                start = System.nanoTime();
+                for (int i = 0; i < NUM_THREADS; i++) {
+                    List<ICacheKey<String>> finalKeysForHits = keysForHits;
+                    List<ICacheKey<String>> finalKeysForMisses= keysForMisses;
+                    ICache<String, String> finalCache = cache;
+                    CountDownLatch finalCountDownLatch = countDownLatch;
+                    Phaser finalPhaser = phaser;
+                    threads[j] = new Thread(() -> {
+                        finalPhaser.arriveAndAwaitAdvance();
+                        reads(finalCache, finalKeysForHits, iterations / 2);
+                        reads(finalCache, finalKeysForMisses, iterations / 2);
+                        finalCountDownLatch.countDown();
+                    });
+                    threads[j].start();
+                    j++;
+                }
+                phaser.arriveAndAwaitAdvance(); // Will trigger parallel gets above
+                countDownLatch.await(); // Wait for all threads to finish
+                end = System.nanoTime();
+
+                // Print default results
                 System.out.println(
                     x + ", "
                         + "default, "
