@@ -19,6 +19,7 @@ import org.opensearch.common.cache.ICacheKey;
 import org.opensearch.common.cache.LoadAwareCacheLoader;
 import org.opensearch.common.cache.RemovalNotification;
 import org.opensearch.common.cache.RemovalReason;
+import org.opensearch.common.cache.settings.CacheSettings;
 import org.opensearch.common.cache.stats.CacheStatsHolder;
 import org.opensearch.common.cache.stats.DefaultCacheStatsHolder;
 import org.opensearch.common.cache.stats.ImmutableCacheStatsHolder;
@@ -28,6 +29,7 @@ import org.opensearch.common.cache.store.config.CacheConfig;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
+import org.opensearch.common.util.FeatureFlags;
 import org.opensearch.core.common.unit.ByteSizeValue;
 
 import java.security.AccessController;
@@ -40,9 +42,6 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ForkJoinPool;
 import java.util.function.Function;
 import java.util.function.ToLongBiFunction;
-
-import static org.opensearch.cache.CaffeineHeapCacheSettings.EXPIRE_AFTER_ACCESS_KEY;
-import static org.opensearch.cache.CaffeineHeapCacheSettings.MAXIMUM_SIZE_IN_BYTES_KEY;
 
 @ExperimentalApi
 public class CaffeineHeapCache<K, V> implements ICache<K, V> {
@@ -220,19 +219,33 @@ public class CaffeineHeapCache<K, V> implements ICache<K, V> {
         public <K, V> ICache<K, V> create(CacheConfig<K, V> config, CacheType cacheType, Map<String, Factory> cacheFactories) {
             Map<String, Setting<?>> settingList = CaffeineHeapCacheSettings.getSettingListForCacheType(cacheType);
             Settings settings = config.getSettings();
-
-            return new Builder<K, V>().setDimensionNames(config.getDimensionNames())
+            boolean statsTrackingEnabled = statsTrackingEnabled(config.getSettings(), config.getStatsTrackingEnabled());
+            ICacheBuilder<K, V> builder = new CaffeineHeapCache.Builder<K, V>().setDimensionNames(config.getDimensionNames())
+                .setStatsTrackingEnabled(statsTrackingEnabled)
+                .setMaximumWeightInBytes(((ByteSizeValue) settingList.get(CaffeineHeapCacheSettings.MAXIMUM_SIZE_IN_BYTES_KEY).get(settings)).getBytes())
+                .setExpireAfterAccess(((TimeValue) settingList.get(CaffeineHeapCacheSettings.EXPIRE_AFTER_ACCESS_KEY).get(settings)))
                 .setWeigher(config.getWeigher())
-                .setRemovalListener(config.getRemovalListener())
-                .setExpireAfterAccess((TimeValue) settingList.get(EXPIRE_AFTER_ACCESS_KEY).get(settings))
-                .setMaximumWeightInBytes(((ByteSizeValue) settingList.get(MAXIMUM_SIZE_IN_BYTES_KEY).get(settings)).getBytes())
-                .setSettings(settings)
-                .build();
+                .setRemovalListener(config.getRemovalListener());
+            Setting<String> cacheSettingForCacheType = CacheSettings.CACHE_TYPE_STORE_NAME.getConcreteSettingForNamespace(
+                cacheType.getSettingPrefix()
+            );
+            String storeName = cacheSettingForCacheType.get(settings);
+            if (!FeatureFlags.PLUGGABLE_CACHE_SETTING.get(settings) || (storeName == null || storeName.isBlank())) {
+                // For backward compatibility as the user intent is to use older settings.
+                builder.setMaximumWeightInBytes(config.getMaxSizeInBytes());
+                builder.setExpireAfterAccess(config.getExpireAfterAccess());
+            }
+            return builder.build();
         }
 
         @Override
         public String getCacheName() {
             return NAME;
+        }
+
+        private boolean statsTrackingEnabled(Settings settings, boolean statsTrackingEnabledConfig) {
+            // Don't track stats when pluggable caching is off, or when explicitly set to false in the CacheConfig
+            return FeatureFlags.PLUGGABLE_CACHE_SETTING.get(settings) && statsTrackingEnabledConfig;
         }
     }
 
