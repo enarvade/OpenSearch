@@ -29,7 +29,7 @@ import java.util.function.ToLongBiFunction;
 public class CaffeineMicrobenchmark extends OpenSearchTestCase {
 
     private final String dimensionName = "shardId";
-    private static final int CACHE_SIZE_IN_BYTES = 5000;
+    private static final int CACHE_SIZE_IN_BYTES = 5000000;
     private static final int MOCK_WEIGHT = 10;
     private static final int NUM_THREADS = 8;
     private static final int[] ITERATIONS = {100000, 1000000, 10000000};
@@ -103,9 +103,7 @@ public class CaffeineMicrobenchmark extends OpenSearchTestCase {
                         + (end - start) + ", "
                         + cache.stats().getTotalHits() + ", "
                         + cache.stats().getTotalMisses() + ", "
-                        + cache.stats().getTotalEvictions() + ", "
-                        + cache.stats().getTotalItems() + ", "
-                        + cache.stats().getTotalSizeInBytes()
+                        + cache.stats().getTotalEvictions()
                 );
 
                 // Default
@@ -150,9 +148,7 @@ public class CaffeineMicrobenchmark extends OpenSearchTestCase {
                         + (end - start) + ", "
                         + cache.stats().getTotalHits() + ", "
                         + cache.stats().getTotalMisses() + ", "
-                        + cache.stats().getTotalEvictions() + ", "
-                        + cache.stats().getTotalItems() + ", "
-                        + cache.stats().getTotalSizeInBytes()
+                        + cache.stats().getTotalEvictions()
                 );
             }
         }

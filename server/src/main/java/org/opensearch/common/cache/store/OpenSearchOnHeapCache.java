@@ -178,15 +178,7 @@ public class OpenSearchOnHeapCache<K, V> implements ICache<K, V>, RemovalListene
                 .setExpireAfterAccess(((TimeValue) settingList.get(EXPIRE_AFTER_ACCESS_KEY).get(settings)))
                 .setWeigher(config.getWeigher())
                 .setRemovalListener(config.getRemovalListener());
-            Setting<String> cacheSettingForCacheType = CacheSettings.CACHE_TYPE_STORE_NAME.getConcreteSettingForNamespace(
-                cacheType.getSettingPrefix()
-            );
-            String storeName = cacheSettingForCacheType.get(settings);
-            if (!FeatureFlags.PLUGGABLE_CACHE_SETTING.get(settings) || (storeName == null || storeName.isBlank())) {
-                // For backward compatibility as the user intent is to use older settings.
-                builder.setMaximumWeightInBytes(config.getMaxSizeInBytes());
-                builder.setExpireAfterAccess(config.getExpireAfterAccess());
-            }
+
             return builder.build();
         }
 
